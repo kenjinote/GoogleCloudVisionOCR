@@ -5,6 +5,7 @@
 
 #include <windows.h>
 #include <wininet.h>
+#include "json11.hpp"
 
 #define API_KEY L"Input your API KEY"
 
@@ -63,6 +64,40 @@ LPBYTE SendGoogleCloudVision(HWND hWnd, LPBYTE lpByte64)
 	return lpByte;
 }
 
+LPWSTR a2w(LPCSTR lpszText)
+{
+	const DWORD dwSize = MultiByteToWideChar(CP_UTF8, 0, lpszText, -1, 0, 0);
+	LPWSTR lpszReturnText = (LPWSTR)GlobalAlloc(0, dwSize * sizeof(WCHAR));
+	MultiByteToWideChar(CP_UTF8, 0, lpszText, -1, lpszReturnText, dwSize);
+	return lpszReturnText;
+}
+
+LPWSTR GetTextFromJson(LPCSTR lpszJson)
+{
+	std::string err;
+	json11::Json v = json11::Json::parse(lpszJson, err);
+	if (err.size() == 0 && !v.is_null())
+	{
+		json11::Json responses = v["responses"];
+		if (!responses.is_null() && responses.is_array()) {
+			json11::Json response0 = responses[0];
+			if (!response0.is_null()) {
+				json11::Json response0 = responses[0];
+				if (!response0.is_null()) {
+					json11::Json fullTextAnnotation = response0["fullTextAnnotation"];
+					if (!fullTextAnnotation.is_null()) {
+						json11::Json text = fullTextAnnotation["text"];
+						if (!text.is_null()) {
+							return a2w(text.string_value().c_str());
+						}
+					}
+				}
+			}
+		}
+	}
+	return 0;
+}
+
 LPBYTE base64encode(LPCBYTE lpData, DWORD dwSize)
 {
 	DWORD dwResult = 0;
@@ -104,30 +139,37 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 					break;
 				}
 				else {
+					LPBYTE lpByte64 = 0;
 					LPBYTE lpByteFile = (LPBYTE)GlobalAlloc(GPTR, GetFileSize(hFile, 0) + 1);
-					DWORD dwReadSize;
-					ReadFile(hFile, lpByteFile, GetFileSize(hFile, 0), &dwReadSize, 0);
-					LPBYTE lpByte64 = base64encode(lpByteFile, dwReadSize);
-					GlobalFree(lpByteFile);
-					CloseHandle(hFile);
-					LPBYTE lpByte = SendGoogleCloudVision(hWnd, lpByte64);
-					DWORD nLength = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)lpByte, -1, 0, 0);
-					LPWSTR lpszStringW = (LPWSTR)GlobalAlloc(0, nLength * sizeof(WCHAR));
-					MultiByteToWideChar(CP_UTF8, 0, (LPCCH)lpByte, -1, lpszStringW, nLength);
-					LPWSTR context = 0;
-					wchar_t* p = wcstok_s(lpszStringW, L"\n", &context);
-					SendMessage(hEdit, WM_SETREDRAW, FALSE, 0);
-					while (p) {
-						SendMessageW(hEdit, EM_REPLACESEL, 0, (LPARAM)p);
-						SendMessageW(hEdit, EM_REPLACESEL, 0, (LPARAM)L"\r\n");
-						p = wcstok_s(0, L"\n", &context);
+					if (lpByteFile) {
+						DWORD dwReadSize;
+						ReadFile(hFile, lpByteFile, GetFileSize(hFile, 0), &dwReadSize, 0);
+						lpByte64 = base64encode(lpByteFile, dwReadSize);
+						GlobalFree(lpByteFile);
 					}
-					SendMessage(hEdit, EM_SETSEL, 0, -1);
-					SendMessage(hEdit, WM_SETREDRAW, TRUE, 0);
-					GlobalFree(lpByte64);
-					GlobalFree(lpszStringW);
-					GlobalFree(lpByte);
-					SetFocus(hEdit);
+					CloseHandle(hFile);
+					if (lpByte64) {
+						LPBYTE lpByte = SendGoogleCloudVision(hWnd, lpByte64);
+						GlobalFree(lpByte64);
+						if (lpByte) {
+							LPWSTR lpszText = GetTextFromJson((LPCSTR)lpByte);
+							if (lpszText) {
+								LPWSTR context = 0;
+								wchar_t* p = wcstok_s(lpszText, L"\n", &context);
+								SendMessage(hEdit, WM_SETREDRAW, FALSE, 0);
+								while (p) {
+									SendMessageW(hEdit, EM_REPLACESEL, 0, (LPARAM)p);
+									SendMessageW(hEdit, EM_REPLACESEL, 0, (LPARAM)L"\r\n");
+									p = wcstok_s(0, L"\n", &context);
+								}
+								SendMessage(hEdit, EM_SETSEL, 0, -1);
+								SendMessage(hEdit, WM_SETREDRAW, TRUE, 0);
+								GlobalFree(lpszText);
+							}
+							GlobalFree(lpByte);
+						}
+						SetFocus(hEdit);
+					}
 				}
 				break;
 			}
